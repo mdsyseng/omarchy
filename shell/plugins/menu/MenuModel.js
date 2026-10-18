@@ -330,6 +330,81 @@ function nameSearchText(entry) {
   return [entry.label, searchableToken(leafIdFor(entry.id)), aliases.join(" ")].join(" ").toLowerCase()
 }
 
+// --- acronym/camelCase matching (local test patch) ---
+function camelWords(value) {
+  var parts = String(value || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9\u00c0-\u024f]+/)
+  var out = []
+  for (var i = 0; i < parts.length; i++) if (parts[i]) out.push(parts[i])
+  return out
+}
+
+function textAcronym(value) {
+  var w = camelWords(value)
+  var r = ""
+  for (var i = 0; i < w.length; i++) r += w[i].charAt(0)
+  return r
+}
+
+function textAcronymMatches(term, value) {
+  term = String(term || "").toLowerCase()
+  if (!term || term.length > 5) return false
+  return textAcronym(value).indexOf(term) === 0
+}
+
+function entryAcronymMatches(entry, term) {
+  if (!entry) return false
+  if (textAcronymMatches(term, entry.label)) return true
+  if (textAcronymMatches(term, leafIdFor(entry.id))) return true
+  var values = Array.isArray(entry.aliases) ? entry.aliases : []
+  for (var i = 0; i < values.length; i++) if (textAcronymMatches(term, values[i])) return true
+  return false
+}
+function isSubsequence(term, text) {
+  var j = 0
+  for (var i = 0; i < text.length && j < term.length; i++) if (text.charAt(i) === term.charAt(j)) j++
+  return j === term.length
+}
+
+// Gapped subsequence over word initials: "rr" -> Ruby on Rails (r-o-r).
+function textFuzzyAcronymMatches(term, value) {
+  term = String(term || "").toLowerCase().replace(/\s+/g, "")
+  if (term.length < 2 || term.length > 8) return false
+  return isSubsequence(term, textAcronym(value))
+}
+
+function entryFuzzyAcronymMatches(entry, term) {
+  if (!entry) return false
+  if (textFuzzyAcronymMatches(term, entry.label)) return true
+  if (textFuzzyAcronymMatches(term, leafIdFor(entry.id))) return true
+  var values = Array.isArray(entry.aliases) ? entry.aliases : []
+  for (var i = 0; i < values.length; i++) if (textFuzzyAcronymMatches(term, values[i])) return true
+  return false
+}
+
+// Match tiers (lower sorts first). Tiers never interleave: each is 100 apart
+// and kind adjustments stay within -5..0.
+//   0   exact full label (absolute top; incl. upstream whole-word app rule)
+//   100 tier A: contiguous initials/camelCase prefix (gb -> Grok Bot / GrokBot)
+//   200 tier B: other direct matches (prefix, substring, alias/id, description)
+//   400 tier C: fuzzy gapped initials (rr -> Ruby on Rails)
+var TIER_EXACT = 0, TIER_ACRONYM = 100, TIER_DIRECT = 200, TIER_FUZZY = 400
+
+function dmenuTier(query, label, detail) {
+  var q = String(query || "").toLowerCase().trim()
+  if (!q) return TIER_DIRECT
+  var l = String(label || "").toLowerCase()
+  if (l === q) return TIER_EXACT
+  if (textAcronymMatches(q, label)) return TIER_ACRONYM
+  if (l.indexOf(q) >= 0 || String(detail || "").toLowerCase().indexOf(q) >= 0) return TIER_DIRECT
+  if (textFuzzyAcronymMatches(q, label)) return TIER_FUZZY
+  return -1
+}
+// --- end patch ---
+
 function termInSearchWords(term, text) {
   var words = String(text || "").toLowerCase().split(/\s+/)
   for (var i = 0; i < words.length; i++) {
@@ -358,6 +433,8 @@ function matchesQuery(entry, query, visible) {
     if (!terms[i]) continue
     if (nameText.indexOf(terms[i]) >= 0) continue
     if (termInSearchWords(terms[i], descriptionText)) continue
+    if (entryAcronymMatches(entry, terms[i])) continue
+    if (entryFuzzyAcronymMatches(entry, terms[i])) continue
     return false
   }
 
@@ -369,16 +446,18 @@ function searchScore(items, entry, query) {
   var label = entry.label.toLowerCase()
   var nameText = nameSearchText(entry)
   var descriptionText = String(entry.description || "").toLowerCase()
-  var score = 80
+  var score = TIER_DIRECT + 80
 
-  if (label === needle) score = entry.parent === "root" ? 2 : 0
+  if (label === needle) score = TIER_EXACT + (entry.parent === "root" ? 2 : 0)
   // An installed app whose name contains the query as a whole word ("zen"
   // for Zen Browser) beats exact-labeled menu entries like Install > Zen.
-  else if (entry.kind === "app" && label.split(/\s+/).indexOf(needle) >= 0) score = 0
-  else if (label.indexOf(needle) === 0) score = 10
-  else if (label.indexOf(needle) >= 0) score = 30
-  else if (nameText.indexOf(needle) >= 0) score = 40
-  else if (descriptionTextMatches(needle, descriptionText)) score = 60
+  else if (entry.kind === "app" && label.split(/\s+/).indexOf(needle) >= 0) score = TIER_EXACT
+  else if (textAcronymMatches(needle, entry.label) || entryAcronymMatches(entry, needle)) score = TIER_ACRONYM + (textAcronymMatches(needle, entry.label) ? 10 : 20)
+  else if (label.indexOf(needle) === 0) score = TIER_DIRECT + 10
+  else if (label.indexOf(needle) >= 0) score = TIER_DIRECT + 30
+  else if (nameText.indexOf(needle) >= 0) score = TIER_DIRECT + 40
+  else if (descriptionTextMatches(needle, descriptionText)) score = TIER_DIRECT + 60
+  else if (entryFuzzyAcronymMatches(entry, needle)) score = TIER_FUZZY + 10
 
   if (entry.kind === "menu" || entry.kind === "link") score -= 2
   // App rows sort after all menu items, so they lose the tiebreak below to an
@@ -714,6 +793,11 @@ if (typeof module !== "undefined") {
     termInSearchWords: termInSearchWords,
     descriptionTextMatches: descriptionTextMatches,
     matchesQuery: matchesQuery,
+    textAcronymMatches: textAcronymMatches,
+    entryAcronymMatches: entryAcronymMatches,
+    textFuzzyAcronymMatches: textFuzzyAcronymMatches,
+    entryFuzzyAcronymMatches: entryFuzzyAcronymMatches,
+    dmenuTier: dmenuTier,
     searchScore: searchScore,
     dmenuValue: dmenuValue,
     dmenuSelections: dmenuSelections,
