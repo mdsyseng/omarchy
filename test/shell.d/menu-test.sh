@@ -951,6 +951,7 @@ const fzEntries = [
   fz('apps.rr', 'RustRover', 'app', 'apps'),
   fz('install.rails', 'Ruby on Rails', 'action', 'install'),
   fz('setup.gbx', 'Gbox Tool', 'menu', 'setup'),
+  fz('setup.mirror', 'Mirror Display', 'action', 'setup'),
 ]
 const fzItems = { root: { id: 'root' }, apps: { id: 'apps', parent: 'root' }, install: { id: 'install', parent: 'root' }, setup: { id: 'setup', parent: 'root' } }
 fzEntries.forEach(e => { fzItems[e.id] = e })
@@ -973,6 +974,12 @@ assert(menu.matchesQuery(multiItems['tools.rails'], 'rr editor', true), 'menu ac
 assert(multiScore('tools.rr') < multiScore('tools.rails'), 'menu ranks direct multi-term matches above word-prefix ones (rr editor)')
 for (const query of ['ror', 'rr', 'rorails', 'rubyrails', 'ronrai', 'ror rails', 'Rorails']) {
   assert(fzSearch(query).includes('Ruby on Rails'), `menu matches word prefixes (${query} -> Ruby on Rails)`)
+}
+assertDeepEqual(fzSearch('ror').filter(l => l === 'Mirror Display' || l === 'Ruby on Rails').sort(), ['Mirror Display', 'Ruby on Rails'], 'menu finds ror inside a word and as initials')
+assert(fzSearch('rord').includes('Mirror Display'), 'menu keeps a mid-word match when the next word starts (rord -> Mirror Display)')
+assert(fzSearch('irrdis').includes('Mirror Display'), 'menu continues a mid-word match with a word prefix (irrdis -> Mirror Display)')
+for (const query of ['rordx', 'rdor', 'rorz']) {
+  assert(!fzSearch(query).includes('Mirror Display'), `menu rejects broken mid-word matches (${query})`)
 }
 assert(fzSearch('rr').indexOf('RustRover') < fzSearch('rr').indexOf('Ruby on Rails'), 'menu ranks contiguous initials above skipped-word matches')
 for (const query of ['zq', 'rorailsx', 'raror', 'calcx']) {

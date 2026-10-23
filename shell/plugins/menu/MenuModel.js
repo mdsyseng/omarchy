@@ -371,7 +371,9 @@ function entryAcronymMatches(entry, term) {
 
 // Word-prefix match: the term is split into prefixes of the words, in order,
 // and words may be skipped. "rr" and "ror" (initials), "rorails" (r-o-rails)
-// and "rubyrails" all match Ruby on Rails.
+// and "rubyrails" all match Ruby on Rails. The first piece may also start
+// inside a word, so "rord" (mi-ror, d-isplay) matches Mirror Display like
+// "ror" already does as a substring.
 function wordPrefixMatches(term, words) {
   var failed = {}
   function from(ti, wi) {
@@ -387,7 +389,16 @@ function wordPrefixMatches(term, words) {
     failed[key] = true
     return false
   }
-  return from(0, 0)
+  if (from(0, 0)) return true
+  for (var wi = 0; wi < words.length; wi++) {
+    var word = words[wi]
+    for (var start = 1; start < word.length; start++) {
+      for (var k = 0; start + k < word.length && k < term.length && word.charAt(start + k) === term.charAt(k); k++) {
+        if (from(k + 1, wi + 1)) return true
+      }
+    }
+  }
+  return false
 }
 
 function textFuzzyAcronymMatches(term, value) {
