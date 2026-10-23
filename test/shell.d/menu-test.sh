@@ -961,7 +961,16 @@ const fzSearch = query => fzEntries
 assertEqual(fzSearch('gb')[0], 'Grok Bot', 'menu puts an initials match (gb -> Grok Bot) above a plain prefix match')
 assertEqual(fzSearch('gc')[0], 'Google Contacts', 'menu matches initials (gc -> Google Contacts)')
 assert(!fzSearch('gc').includes('Calculator'), 'menu does not match initials against letters inside one word')
-assertEqual(fzSearch('vsc')[0], 'VSCodium', 'menu matches camelCase initials (vsc -> VSCodium)')
+assert(fzSearch('vc').includes('VSCodium'), 'menu splits camelCase words (vc -> VSCodium)')
+assert(menu.textAcronymMatches('gb', 'GrokBot'), 'menu reads camelCase initials (gb -> GrokBot)')
+const translated = { id: 'style.menulinje', label: 'Menulinje', kind: 'action', parent: 'style', aliases: [], searchTerms: ['Menu Bar'], description: '', order: 0 }
+assert(menu.matchesQuery(translated, 'mb', true), 'menu keeps English initials after a translation (mb -> Menu Bar)')
+const multiItems = { root: { id: 'root' }, tools: { id: 'tools', parent: 'root' } }
+multiItems['tools.rails'] = { id: 'tools.rails', label: 'Ruby on Rails', kind: 'action', parent: 'tools', aliases: [], description: 'editor', order: 0 }
+multiItems['tools.rr'] = { id: 'tools.rr', label: 'RR Tool', kind: 'action', parent: 'tools', aliases: [], description: 'editor', order: 1 }
+const multiScore = id => menu.searchScore(multiItems, multiItems[id], 'rr editor')
+assert(menu.matchesQuery(multiItems['tools.rails'], 'rr editor', true), 'menu accepts word prefixes per term (rr editor)')
+assert(multiScore('tools.rr') < multiScore('tools.rails'), 'menu ranks direct multi-term matches above word-prefix ones (rr editor)')
 for (const query of ['ror', 'rr', 'rorails', 'rubyrails', 'ronrai', 'ror rails', 'Rorails']) {
   assert(fzSearch(query).includes('Ruby on Rails'), `menu matches word prefixes (${query} -> Ruby on Rails)`)
 }

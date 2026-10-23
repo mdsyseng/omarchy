@@ -355,18 +355,18 @@ function textAcronymMatches(term, value) {
   return textAcronym(value).indexOf(term) === 0
 }
 
+// Aliases plus searchTerms, where translations keep the English label.
+function entryNameValues(entry) {
+  return (Array.isArray(entry.aliases) ? entry.aliases : []).concat(Array.isArray(entry.searchTerms) ? entry.searchTerms : [])
+}
+
 function entryAcronymMatches(entry, term) {
   if (!entry) return false
   if (textAcronymMatches(term, entry.label)) return true
   if (textAcronymMatches(term, leafIdFor(entry.id))) return true
-  var values = Array.isArray(entry.aliases) ? entry.aliases : []
+  var values = entryNameValues(entry)
   for (var i = 0; i < values.length; i++) if (textAcronymMatches(term, values[i])) return true
   return false
-}
-function isSubsequence(term, text) {
-  var j = 0
-  for (var i = 0; i < text.length && j < term.length; i++) if (text.charAt(i) === term.charAt(j)) j++
-  return j === term.length
 }
 
 // Word-prefix match: the term is split into prefixes of the words, in order,
@@ -400,7 +400,7 @@ function entryFuzzyAcronymMatches(entry, term) {
   if (!entry) return false
   if (textFuzzyAcronymMatches(term, entry.label)) return true
   if (textFuzzyAcronymMatches(term, leafIdFor(entry.id))) return true
-  var values = Array.isArray(entry.aliases) ? entry.aliases : []
+  var values = entryNameValues(entry)
   for (var i = 0; i < values.length; i++) if (textFuzzyAcronymMatches(term, values[i])) return true
   return false
 }
@@ -461,6 +461,18 @@ function matchesQuery(entry, query, visible) {
   return true
 }
 
+function needsWordPrefixMatch(entry, query, nameText, descriptionText) {
+  var terms = query.split(/\s+/)
+  for (var i = 0; i < terms.length; i++) {
+    if (!terms[i]) continue
+    if (nameText.indexOf(terms[i]) >= 0) continue
+    if (termInSearchWords(terms[i], descriptionText)) continue
+    if (entryAcronymMatches(entry, terms[i])) continue
+    if (entryFuzzyAcronymMatches(entry, terms[i])) return true
+  }
+  return false
+}
+
 function searchScore(items, entry, query) {
   var needle = String(query || "").toLowerCase().trim()
   var label = entry.label.toLowerCase()
@@ -478,6 +490,9 @@ function searchScore(items, entry, query) {
   else if (nameText.indexOf(needle) >= 0) score = TIER_DIRECT + 40
   else if (descriptionTextMatches(needle, descriptionText)) score = TIER_DIRECT + 60
   else if (entryFuzzyAcronymMatches(entry, needle)) score = TIER_FUZZY + 10
+  // Multi-term queries: matchesQuery accepts each term on its own, so a row
+  // with any term matched only by word prefixes stays in the word-prefix tier.
+  else if (needsWordPrefixMatch(entry, needle, nameText, descriptionText)) score = TIER_FUZZY + 80
 
   if (entry.kind === "menu" || entry.kind === "link") score -= 2
   // App rows sort after all menu items, so they lose the tiebreak below to an
