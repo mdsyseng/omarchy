@@ -369,11 +369,31 @@ function isSubsequence(term, text) {
   return j === term.length
 }
 
-// Gapped subsequence over word initials: "rr" -> Ruby on Rails (r-o-r).
+// Word-prefix match: the term is split into prefixes of the words, in order,
+// and words may be skipped. "rr" and "ror" (initials), "rorails" (r-o-rails)
+// and "rubyrails" all match Ruby on Rails.
+function wordPrefixMatches(term, words) {
+  var failed = {}
+  function from(ti, wi) {
+    if (ti === term.length) return true
+    if (wi >= words.length) return false
+    var key = ti + ":" + wi
+    if (failed[key]) return false
+    var word = words[wi]
+    for (var k = 0; k < word.length && ti + k < term.length && word.charAt(k) === term.charAt(ti + k); k++) {
+      if (from(ti + k + 1, wi + 1)) return true
+    }
+    if (from(ti, wi + 1)) return true
+    failed[key] = true
+    return false
+  }
+  return from(0, 0)
+}
+
 function textFuzzyAcronymMatches(term, value) {
   term = String(term || "").toLowerCase().replace(/\s+/g, "")
-  if (term.length < 2 || term.length > 8) return false
-  return isSubsequence(term, textAcronym(value))
+  if (term.length < 2 || term.length > 64) return false
+  return wordPrefixMatches(term, camelWords(value))
 }
 
 function entryFuzzyAcronymMatches(entry, term) {
@@ -390,7 +410,7 @@ function entryFuzzyAcronymMatches(entry, term) {
 //   0   exact full label (absolute top; incl. upstream whole-word app rule)
 //   100 tier A: contiguous initials/camelCase prefix (gb -> Grok Bot / GrokBot)
 //   200 tier B: other direct matches (prefix, substring, alias/id, description)
-//   400 tier C: fuzzy gapped initials (rr -> Ruby on Rails)
+//   400 tier C: word prefixes, words may be skipped (rr, rorails -> Ruby on Rails)
 var TIER_EXACT = 0, TIER_ACRONYM = 100, TIER_DIRECT = 200, TIER_FUZZY = 400
 
 function dmenuTier(query, label, detail) {

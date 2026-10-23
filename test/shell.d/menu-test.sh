@@ -940,6 +940,39 @@ assert(
   /function openExistingMenu\([\s\S]*?root\.evaluateGuards\(\)/.test(menuQml),
   'menu still evaluates guards on every open, settled or not'
 )
+
+// Initials and word-prefix search (gb -> Grok Bot, rorails -> Ruby on Rails).
+const fz = (id, label, kind, parent, aliases = []) => ({ id, label, kind, parent, aliases, description: '', order: 0 })
+const fzEntries = [
+  fz('apps.grok-bot', 'Grok Bot', 'app', 'apps'),
+  fz('apps.gc', 'Google Contacts', 'app', 'apps'),
+  fz('apps.calc', 'Calculator', 'app', 'apps'),
+  fz('apps.vsc', 'VSCodium', 'app', 'apps'),
+  fz('apps.rr', 'RustRover', 'app', 'apps'),
+  fz('install.rails', 'Ruby on Rails', 'action', 'install'),
+  fz('setup.gbx', 'Gbox Tool', 'menu', 'setup'),
+]
+const fzItems = { root: { id: 'root' }, apps: { id: 'apps', parent: 'root' }, install: { id: 'install', parent: 'root' }, setup: { id: 'setup', parent: 'root' } }
+fzEntries.forEach(e => { fzItems[e.id] = e })
+const fzSearch = query => fzEntries
+  .filter(e => menu.matchesQuery(e, query, true))
+  .sort((a, b) => menu.searchScore(fzItems, a, query) - menu.searchScore(fzItems, b, query))
+  .map(e => e.label)
+assertEqual(fzSearch('gb')[0], 'Grok Bot', 'menu puts an initials match (gb -> Grok Bot) above a plain prefix match')
+assertEqual(fzSearch('gc')[0], 'Google Contacts', 'menu matches initials (gc -> Google Contacts)')
+assert(!fzSearch('gc').includes('Calculator'), 'menu does not match initials against letters inside one word')
+assertEqual(fzSearch('vsc')[0], 'VSCodium', 'menu matches camelCase initials (vsc -> VSCodium)')
+for (const query of ['ror', 'rr', 'rorails', 'rubyrails', 'ronrai', 'ror rails', 'Rorails']) {
+  assert(fzSearch(query).includes('Ruby on Rails'), `menu matches word prefixes (${query} -> Ruby on Rails)`)
+}
+assert(fzSearch('rr').indexOf('RustRover') < fzSearch('rr').indexOf('Ruby on Rails'), 'menu ranks contiguous initials above skipped-word matches')
+for (const query of ['zq', 'rorailsx', 'raror', 'calcx']) {
+  assertEqual(fzSearch(query).length, 0, `menu rejects non-matching word prefixes (${query})`)
+}
+assert(menu.textFuzzyAcronymMatches('rorails', 'Ruby on Rails'), 'word-prefix matcher accepts initials plus a whole word')
+assert(!menu.textFuzzyAcronymMatches('rails ruby', 'Ruby on Rails'), 'word-prefix matcher keeps word order')
+assertEqual(menu.dmenuTier('rorails', 'Ruby on Rails', ''), 400, 'picker puts word-prefix matches in the fuzzy tier')
+assertEqual(menu.dmenuTier('zz', 'Calculator', ''), -1, 'picker rejects non-matches')
 JS
 
 font_charset=$(fc-query --format='%{charset}' "$ROOT/default/fonts/omarchy/omarchy.ttf")
