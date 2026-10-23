@@ -322,8 +322,20 @@ function leafIdFor(id) {
   return parts.length > 0 ? parts[parts.length - 1] : id
 }
 
+// nameSearchText runs for every row on every keystroke; rows are rebuilt
+// when the menu changes, so caching by row object stays correct.
+var nameSearchTextCache = typeof WeakMap === "function" ? new WeakMap() : null
+
 function nameSearchText(entry) {
   if (!entry) return ""
+  var cached = nameSearchTextCache ? nameSearchTextCache.get(entry) : undefined
+  if (cached !== undefined) return cached
+  var text = buildNameSearchText(entry)
+  if (nameSearchTextCache) nameSearchTextCache.set(entry, text)
+  return text
+}
+
+function buildNameSearchText(entry) {
   var aliases = []
   var values = (Array.isArray(entry.aliases) ? entry.aliases : []).concat(Array.isArray(entry.searchTerms) ? entry.searchTerms : [])
   for (var i = 0; i < values.length; i++) aliases.push(searchableToken(values[i]))
@@ -342,11 +354,36 @@ function camelWords(value) {
   return out
 }
 
+// Search runs on every keystroke over every row, so split each name once.
+var wordInfoCache = Object.create(null)
+var wordInfoCacheSize = 0
+
+function wordInfo(value) {
+  var key = String(value || "")
+  var info = wordInfoCache[key]
+  if (info) return info
+  var words = camelWords(key)
+  var acronym = ""
+  for (var i = 0; i < words.length; i++) acronym += words[i].charAt(0)
+  if (wordInfoCacheSize >= 5000) {
+    wordInfoCache = Object.create(null)
+    wordInfoCacheSize = 0
+  }
+  info = { words: words, acronym: acronym, joined: words.join("") }
+  wordInfoCache[key] = info
+  wordInfoCacheSize++
+  return info
+}
+
 function textAcronym(value) {
-  var w = camelWords(value)
-  var r = ""
-  for (var i = 0; i < w.length; i++) r += w[i].charAt(0)
-  return r
+  return wordInfo(value).acronym
+}
+
+// Cheap reject: every match below uses the term's letters in order.
+function lettersInOrder(term, text) {
+  var j = 0
+  for (var i = 0; i < text.length && j < term.length; i++) if (text.charCodeAt(i) === term.charCodeAt(j)) j++
+  return j === term.length
 }
 
 function textAcronymMatches(term, value) {
@@ -355,17 +392,28 @@ function textAcronymMatches(term, value) {
   return textAcronym(value).indexOf(term) === 0
 }
 
-// Aliases plus searchTerms, where translations keep the English label.
-function entryNameValues(entry) {
-  return (Array.isArray(entry.aliases) ? entry.aliases : []).concat(Array.isArray(entry.searchTerms) ? entry.searchTerms : [])
+// Every name a row answers to: label, leaf id, aliases, and searchTerms
+// (where translations keep the English label). Built once per row object.
+var entryNamesCache = typeof WeakMap === "function" ? new WeakMap() : null
+
+function entryNameInfos(entry) {
+  var infos = entryNamesCache ? entryNamesCache.get(entry) : null
+  if (infos) return infos
+  var values = [entry.label, leafIdFor(entry.id)]
+    .concat(Array.isArray(entry.aliases) ? entry.aliases : [])
+    .concat(Array.isArray(entry.searchTerms) ? entry.searchTerms : [])
+  infos = []
+  for (var i = 0; i < values.length; i++) infos.push(wordInfo(values[i]))
+  if (entryNamesCache) entryNamesCache.set(entry, infos)
+  return infos
 }
 
 function entryAcronymMatches(entry, term) {
   if (!entry) return false
-  if (textAcronymMatches(term, entry.label)) return true
-  if (textAcronymMatches(term, leafIdFor(entry.id))) return true
-  var values = entryNameValues(entry)
-  for (var i = 0; i < values.length; i++) if (textAcronymMatches(term, values[i])) return true
+  term = String(term || "").toLowerCase()
+  if (!term || term.length > 5) return false
+  var infos = entryNameInfos(entry)
+  for (var i = 0; i < infos.length; i++) if (infos[i].acronym.indexOf(term) === 0) return true
   return false
 }
 
@@ -401,18 +449,26 @@ function wordPrefixMatches(term, words) {
   return false
 }
 
-function textFuzzyAcronymMatches(term, value) {
+function fuzzyTerm(term) {
   term = String(term || "").toLowerCase().replace(/\s+/g, "")
-  if (term.length < 2 || term.length > 64) return false
-  return wordPrefixMatches(term, camelWords(value))
+  return term.length < 2 || term.length > 64 ? "" : term
+}
+
+function infoWordPrefixMatches(term, info) {
+  return lettersInOrder(term, info.joined) && wordPrefixMatches(term, info.words)
+}
+
+function textFuzzyAcronymMatches(term, value) {
+  term = fuzzyTerm(term)
+  return !!term && infoWordPrefixMatches(term, wordInfo(value))
 }
 
 function entryFuzzyAcronymMatches(entry, term) {
   if (!entry) return false
-  if (textFuzzyAcronymMatches(term, entry.label)) return true
-  if (textFuzzyAcronymMatches(term, leafIdFor(entry.id))) return true
-  var values = entryNameValues(entry)
-  for (var i = 0; i < values.length; i++) if (textFuzzyAcronymMatches(term, values[i])) return true
+  term = fuzzyTerm(term)
+  if (!term) return false
+  var infos = entryNameInfos(entry)
+  for (var i = 0; i < infos.length; i++) if (infoWordPrefixMatches(term, infos[i])) return true
   return false
 }
 
